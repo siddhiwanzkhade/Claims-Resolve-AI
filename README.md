@@ -1,2 +1,2 @@
 # E-commerce-Claim-AI
-Agentic Multimodal RAG System for E-Commerce Refund and Issue Resolution
+EcomCareAI is an agentic multimodal RAG system designed to improve customer satisfaction in e-commerce issue resolution. By leveraging LLMs, VLMs, policy-grounded retrieval, and risk scoring, it evaluates customer complaints and recommends refund, replacement, manual review, or escalation decisions.
