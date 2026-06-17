@@ -50,6 +50,7 @@ Image-text mismatch
 
 High-value repeated claim
 → Complaint Agent + Order Agent + Risk Agent + Human Escalation
+```
 
 ## Installation
 
