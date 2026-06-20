@@ -1,110 +1,38 @@
 import json
-import os
-from pathlib import Path
+from typing import Optional
 
-from langchain_chroma import Chroma
-from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-
-from src.config import POLICY_DIR, CHROMA_DIR
+from src.rag.retriever import retrieve_policy_chunks
 
 
-def load_policy_documents():
+def infer_policy_type(issue_type: str, requested_action: str) -> Optional[str]:
     """
-    Loads all .txt policy files from data/policy.
+    Maps claim intent to the most relevant policy_type metadata.
+    This narrows Pinecone retrieval to the most relevant policy subset.
     """
 
-    policy_path = Path(POLICY_DIR)
+    issue_type = (issue_type or "").lower()
+    requested_action = (requested_action or "").lower()
 
-    documents = []
+    if "damage" in issue_type or "damaged" in issue_type or "defective" in issue_type:
+        if requested_action == "replacement":
+            return "replacement"
+        if requested_action == "refund":
+            return "refund"
+        return "damaged_delivery"
 
-    for file_path in policy_path.glob("*.txt"):
-        loader = TextLoader(str(file_path), encoding="utf-8")
-        docs = loader.load()
+    if "wrong" in issue_type or "incorrect" in issue_type:
+        return "replacement"
 
-        for doc in docs:
-            doc.metadata["source"] = file_path.name
+    if "missing" in issue_type or "not_received" in issue_type:
+        return "refund"
 
-        documents.extend(docs)
+    if "return" in issue_type or "return" in requested_action:
+        return "return_condition"
 
-    return documents
+    if "manual" in requested_action or "escalation" in requested_action:
+        return "manual_review"
 
-
-def build_policy_vectorstore():
-    """
-    Builds or refreshes a ChromaDB vector store from policy documents.
-    """
-
-    documents = load_policy_documents()
-
-    if not documents:
-        raise ValueError(f"No policy documents found in {POLICY_DIR}")
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=80
-    )
-
-    chunks = splitter.split_documents(documents)
-
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=CHROMA_DIR
-    )
-
-    return vectorstore
-
-
-def get_policy_vectorstore():
-    """
-    Loads existing ChromaDB vector store if it exists.
-    Otherwise builds it from policy files.
-    """
-
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-
-    if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
-        return Chroma(
-            persist_directory=CHROMA_DIR,
-            embedding_function=embeddings
-        )
-
-    return build_policy_vectorstore()
-
-
-def retrieve_policy_evidence(query: str, top_k: int = 3) -> dict:
-    """
-    Retrieves top relevant policy chunks for a claim-related query.
-    """
-
-    vectorstore = get_policy_vectorstore()
-
-    results = vectorstore.similarity_search_with_score(
-        query=query,
-        k=top_k
-    )
-
-    evidence = []
-
-    for doc, score in results:
-        evidence.append({
-            "source_policy": doc.metadata.get("source", "unknown"),
-            "content": doc.page_content,
-            "similarity_score": float(score)
-        })
-
-    return {
-        "query": query,
-        "retrieved_evidence": evidence
-    }
+    return None
 
 
 def build_policy_query(
@@ -113,51 +41,78 @@ def build_policy_query(
     vision_result: dict
 ) -> str:
     """
-    Converts agent outputs into a search query for policy retrieval.
+    Converts outputs from complaint/order/vision agents into a retrieval query.
     """
 
     issue_type = complaint_result.get("issue_type", "unclear")
     requested_action = complaint_result.get("requested_action", "unclear")
+    sentiment = complaint_result.get("sentiment", "neutral")
     urgency = complaint_result.get("urgency", "low")
+    summary = complaint_result.get("summary", "")
 
     return_window_status = order_result.get("return_window_status", "unknown")
-    customer_claim_risk = order_result.get("customer_claim_risk", "unknown")
+    delivery_issue = order_result.get("delivery_issue", "unknown")
     order_value_risk = order_result.get("order_value_risk", "unknown")
+    customer_claim_risk = order_result.get("customer_claim_risk", "unknown")
 
-    damage_detected = vision_result.get("damage_detected", False)
-    damage_type = vision_result.get("damage_type", "unclear")
+    damage_detected = vision_result.get("damage_detected", "unknown")
+    damage_type = vision_result.get("damage_type", "unknown")
     damage_severity = vision_result.get("damage_severity", "unknown")
+    visible_evidence = vision_result.get("visible_evidence", "")
+    vision_confidence = vision_result.get("confidence", "unknown")
 
     query = f"""
-    Customer claim policy lookup:
+    E-commerce visual claim policy lookup.
+
+    Customer complaint:
     issue_type: {issue_type}
     requested_action: {requested_action}
+    sentiment: {sentiment}
     urgency: {urgency}
+    summary: {summary}
+
+    Order context:
     return_window_status: {return_window_status}
-    customer_claim_risk: {customer_claim_risk}
+    delivery_issue: {delivery_issue}
     order_value_risk: {order_value_risk}
+    customer_claim_risk: {customer_claim_risk}
+
+    Visual evidence:
     damage_detected: {damage_detected}
     damage_type: {damage_type}
     damage_severity: {damage_severity}
+    visible_evidence: {visible_evidence}
+    confidence: {vision_confidence}
 
-    Find refund, replacement, damaged delivery, return, or escalation policy evidence.
+    Retrieve policy sections about refund eligibility, replacement eligibility,
+    damaged or defective item handling, return windows, evidence requirements,
+    false claims, manual review, and escalation.
     """
 
-    return query
+    return query.strip()
 
 
-def retrieve_policy_for_claim(
+def run_policy_rag_agent(
     complaint_result: dict,
     order_result: dict,
     vision_result: dict,
+    company: str,
     top_k: int = 3
 ) -> dict:
     """
-    Main function used by the full pipeline.
+    Main Policy RAG Agent.
 
-    Takes outputs from complaint/order/vision agents and retrieves
-    relevant policy evidence.
+    This function retrieves relevant policy evidence from Pinecone.
+    It assumes Pinecone has already been built using build_policy_index.py.
     """
+
+    issue_type = complaint_result.get("issue_type", "unclear")
+    requested_action = complaint_result.get("requested_action", "unclear")
+
+    policy_type = infer_policy_type(
+        issue_type=issue_type,
+        requested_action=requested_action
+    )
 
     query = build_policy_query(
         complaint_result=complaint_result,
@@ -165,7 +120,31 @@ def retrieve_policy_for_claim(
         vision_result=vision_result
     )
 
-    return retrieve_policy_evidence(query=query, top_k=top_k)
+    docs = retrieve_policy_chunks(
+        query=query,
+        company=company,
+        policy_type=policy_type,
+        k=top_k
+    )
+
+    evidence = []
+
+    for doc in docs:
+        evidence.append({
+            "source_file": doc.metadata.get("source_file"),
+            "company": doc.metadata.get("company"),
+            "policy_type": doc.metadata.get("policy_type"),
+            "section_title": doc.metadata.get("section_title"),
+            "chunk_id": doc.metadata.get("chunk_id"),
+            "content": doc.page_content
+        })
+
+    return {
+        "query": query,
+        "company_filter": company,
+        "policy_type_filter": policy_type,
+        "retrieved_evidence": evidence
+    }
 
 
 if __name__ == "__main__":
@@ -181,8 +160,7 @@ if __name__ == "__main__":
         "return_window_status": "within_return_window",
         "delivery_issue": "delivered",
         "order_value_risk": "medium",
-        "customer_claim_risk": "low",
-        "recommended_action_hint": "eligible_for_resolution"
+        "customer_claim_risk": "low"
     }
 
     sample_vision = {
@@ -193,10 +171,12 @@ if __name__ == "__main__":
         "confidence": "high"
     }
 
-    result = retrieve_policy_for_claim(
+    result = run_policy_rag_agent(
         complaint_result=sample_complaint,
         order_result=sample_order,
-        vision_result=sample_vision
+        vision_result=sample_vision,
+        company="bestbuy",
+        top_k=3
     )
 
     print(json.dumps(result, indent=2))

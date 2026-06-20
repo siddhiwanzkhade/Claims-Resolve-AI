@@ -4,6 +4,10 @@ import mimetypes
 import subprocess
 
 from groq import Groq
+from pydantic import ValidationError
+
+from src.schemas import VisionAnalysis
+
 from src.config import (
     GROQ_API_KEY,
     GROQ_VISION_MODEL,
@@ -52,6 +56,22 @@ def extract_json(text: str) -> dict:
     except json.JSONDecodeError:
         raise ValueError(f"Could not parse JSON from model output: {text}")
 
+def validate_vision_result(result: dict) -> dict:
+    """
+    Validates vision-agent output using Pydantic.
+
+    This ensures the VLM returns the required fields before the result
+    enters the LangGraph state.
+    """
+    try:
+        validated = VisionAnalysis(**result)
+        return validated.model_dump()
+
+    except ValidationError as e:
+        raise ValueError(
+            f"Vision Agent returned invalid structured output: {e}"
+        )
+    
 def encode_image_to_data_url(image_path: str) -> str:
     """
     Converts a local image file into a base64 data URL.
@@ -162,7 +182,7 @@ def analyze_with_groq(image_path: str) -> dict:
     # Add metadata so we know which backend produced the result.
     result["model_backend"] = "groq_vision"
 
-    return result
+    return validate_vision_result(result)
 
 
 def analyze_with_mlx(image_path: str) -> dict:
@@ -218,7 +238,7 @@ def analyze_with_mlx(image_path: str) -> dict:
     # Add backend metadata.
     result["model_backend"] = "mlx_qwen2.5_vl_4bit"
 
-    return result
+    return validate_vision_result(result)
 
 
 def analyze_product_image(image_path: str, backend: str = None) -> dict:
@@ -236,7 +256,7 @@ def analyze_product_image(image_path: str, backend: str = None) -> dict:
 
     # Graceful fallback if user does not upload an image.
     if not image_path:
-        return {
+        fallback_result = {
             "damage_detected": False,
             "damage_type": "no_image",
             "damage_severity": "unknown",
@@ -244,6 +264,7 @@ def analyze_product_image(image_path: str, backend: str = None) -> dict:
             "confidence": "low",
             "model_backend": "none"
         }
+        return validate_vision_result(fallback_result)
 
     # Use explicit backend if provided, otherwise use default from .env.
     backend = backend or VISION_BACKEND

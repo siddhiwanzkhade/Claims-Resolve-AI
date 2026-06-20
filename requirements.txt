@@ -1,13 +1,29 @@
 gradio
 python-dotenv
-google-generativeai
+
+# LLM / VLM APIs
+groq
+
+# Agent orchestration
+langgraph
 langchain
 langchain-community
 langchain-text-splitters
-langchain-chroma
-chromadb
+
+# Vector DB / RAG
+pinecone
 sentence-transformers
+
+# PDF / document parsing
+pypdf
+
+# Data processing
 pandas
 numpy
+
+# Image handling
 pillow
+
+# Output validation
+pydantic
 
