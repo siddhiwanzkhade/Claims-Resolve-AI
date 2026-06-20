@@ -1,4 +1,4 @@
-# E-commerce-Claim-AI
+# Claims-Resolve AI
 
 E-commerce-Claim-AI is a multimodal agentic AI solution designed to streamline and strengthen e-commerce claim investigation. By leveraging AI agents, vision-language models, NLP, and risk scoring, it helps evaluate refund, replacement, damaged-product, wrong-item, and missing-package claims with better accuracy and decision support.
 
