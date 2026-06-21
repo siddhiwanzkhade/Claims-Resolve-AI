@@ -24,13 +24,8 @@ Claims-Resolve AI is an agentic, multimodal solution designed to streamline and 
 * **Resolution Agent**: Generates the final claim decision using complaint, order, vision, policy, and risk signals.
 
 
-## Claim Resolution Flow
-
-```text
-User Input → Input Validation → Complaint Agent → Order Agent → Vision Agent → Policy RAG Agent → Risk Scoring Agent → Resolution Agent → Final Decision
-```
 ```mermaid
-flowchart TD
+flowchart LR
     A["Claim submitted<br/>Item arrived cracked, replacement requested"] --> B["Complaint Agent<br/>issue: damaged, action: replacement"]
     B --> C["Order Agent<br/>delivered, within return window"]
     C --> D["Vision Agent<br/>crack detected, evidence quality: high"]
