@@ -1,4 +1,4 @@
-# Claims-Resolve AI
+# Claims-Resolve-AI
 
 Claims-Resolve AI is an agentic, multimodal solution designed to streamline and automate e-commerce refund and replacement claims. By leveraging specialized AI agents through LangGraph, it enhances efficiency, accuracy, and policy compliance in claims management.
 
